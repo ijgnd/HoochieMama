@@ -22,12 +22,15 @@ PRIORITIZE_TODAY = False
 IMPOSE_SUBDECK_LIMIT = False
 
 #Default: Reviews are sorted by dues and randomized in chunks.
-CUSTOM_SORT = None
-# CUSTOM_SORT = SHOW_YOUNG_FIRST
+# CUSTOM_SORT = None
+CUSTOM_SORT = SHOW_YOUNG_FIRST
 # CUSTOM_SORT = SHOW_MATURE_FIRST
 # CUSTOM_SORT = SHOW_LOW_REPS_FIRST
 # CUSTOM_SORT = SHOW_HIGH_REPS_FIRST
 # CUSTOM_SORT = SORT_BY_OVERDUES
+
+USE_CUSTOM = True
+CUSTOM_ASC_CUTOFF = 5
 
 # == End Config ==========================================
 ##########################################################
@@ -80,6 +83,8 @@ def fillRev(self, _old):
         sortBy=CUSTOM_SORT if CUSTOM_SORT else 'order by due'
         if IMPOSE_SUBDECK_LIMIT:
             self._revQueue=getRevQueuePerSubDeck(self,sortBy,lim)
+        elif USE_CUSTOM:
+            self._revQueue=myqueue(self,sortBy,lim)
         else:
             self._revQueue=getRevQueue(self,sortBy,lim)
 
@@ -99,8 +104,59 @@ def fillRev(self, _old):
         self._resetRev()
         return self._fillRev()
 
+    
+    
+    
+
+def intra_day_randomization_of_revQueue(self, idlist):
+    l = []
+    for c in idlist:
+        #did included only for debugging with print ...
+        l.append((c,self.col.getCard(c).ivl,self.col.getCard(c).did))
+
+    same_ListPos= []
+    same_IDs = []
+
+    for i in range(len(l)-1):
+        same_ListPos.append(i)
+        same_IDs.append(l[i])
+        if (not l[i][1] == l[i+1][1]) or (i == len(l)-2):
+            r = random.Random()
+            r.shuffle(same_IDs)
+            for i in same_ListPos:
+                l[i]=same_IDs.pop() 
+            for a,b in enumerate(l):
+                idlist[a]=b[0]
+            same_ListPos= []
+            same_IDs = []
+    return idlist
 
 
+def myqueue(self, sortBy, penetration):
+    debugInfo('myqueue')
+    deckList=ids2str(self.col.decks.active())
+
+    revQueue = self.col.db.list("""
+select id from cards where
+did in %s and queue = 2 and due <= ? and ivl < %d
+%s limit ?""" % (deckList, CUSTOM_ASC_CUTOFF, sortBy),
+                self.today, penetration)
+
+    revQueue = intra_day_randomization_of_revQueue(self,revQueue)
+
+    revQueue.extend(self.col.db.list("""
+select id from cards where
+did in %s and queue = 2 and due <= ?
+%s limit ?""" % (deckList, "order by due"),
+                self.today, penetration))
+
+    return revQueue    
+    
+    
+
+    
+    
+    
 # In the world of blackjack, “penetration”, or “deck penetration”, 
 # is the amount of cards that the dealer cuts off, relative to the cards dealt out.
 def getRevQueue(self, sortBy, penetration):
